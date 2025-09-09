@@ -1,0 +1,18 @@
+{
+  "Alice": {
+    "name": "Alice",
+    "age": 25,
+    "height": "5'6\""
+  },
+  "Suhaan": {
+    "name": "Suhaan",
+    "age": 18,
+    "height": "5'10\""
+  },
+
+  "Nishant": {
+    "name": "Nishant",
+    "age": 18,
+    "height": "5'8\""
+  }
+}
