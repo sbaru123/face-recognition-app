@@ -23,16 +23,18 @@ for filename in os.listdir("known_faces"):
 # --- Function to pick correct webcam ---
 def get_webcam_index(max_index=5):
     for i in range(max_index):
-        cap = cv2.VideoCapture(i)
+        cap = cv2.VideoCapture(i, cv2.CAP_AVFOUNDATION)
         if cap.isOpened():
-            print(f"Camera found at index {i}")
+            ret, _ = cap.read()
             cap.release()
-            return i
-    return 0  # fallback
+            if ret:
+                print(f"Working camera found at index {i}")
+                return i
+    print("No working camera found, defaulting to 0")
+    return 0
 
-# Use built-in computer webcam
-
-video_capture = cv2.VideoCapture(0, cv2.CAP_AVFOUNDATION)
+camera_index = get_webcam_index()
+video_capture = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
 
 while True:
     ret, frame = video_capture.read()
