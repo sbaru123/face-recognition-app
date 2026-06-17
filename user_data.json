@@ -14,5 +14,10 @@
     "name": "Nishant",
     "age": 18,
     "height": "5'8\""
+  },
+  "Viv": {
+    "name": "Viv",
+    "age": 15,
+    "height": "5'3\""
   }
 }

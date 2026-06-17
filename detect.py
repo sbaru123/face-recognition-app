@@ -1,26 +1,20 @@
-import face_recognition
 import cv2
-import os
-import json
+import face_recognition
+import mediapipe as mp
+import numpy as np
+from collections import deque
+from database import load_all_encodings, log_attendance
 
-# Load user data
-with open("user_data.json", "r") as f:
-    user_data = json.load(f)
+# --- Load known encodings from DB ---
+print("Loading face encodings from database...")
+known_encodings, known_students = load_all_encodings()
+print(f"Loaded {len(known_encodings)} encoding(s) for {len(set(s.id for s in known_students))} student(s).")
 
-# Load known faces
-known_face_encodings = []
-known_face_names = []
+# --- MediaPipe setup ---
+mp_face_detection = mp.solutions.face_detection
+face_detector = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
 
-for filename in os.listdir("known_faces"):
-    if filename.endswith(".jpg"):
-        image = face_recognition.load_image_file(f"known_faces/{filename}")
-        encoding = face_recognition.face_encodings(image)
-        if encoding:
-            known_face_encodings.append(encoding[0])
-            name_key = filename.split(".")[0]
-            known_face_names.append(name_key)
 
-# --- Function to pick correct webcam ---
 def get_webcam_index(max_index=5):
     for i in range(max_index):
         cap = cv2.VideoCapture(i, cv2.CAP_AVFOUNDATION)
@@ -33,8 +27,26 @@ def get_webcam_index(max_index=5):
     print("No working camera found, defaulting to 0")
     return 0
 
+
 camera_index = get_webcam_index()
 video_capture = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
+
+# Warm up camera
+for _ in range(10):
+    video_capture.read()
+
+frame_count = 0
+last_face_locations = []
+last_display_texts   = []
+
+# Rolling vote buffer — smooths flickering across last N detections
+SMOOTHING_FRAMES = 8
+name_history = deque(maxlen=SMOOTHING_FRAMES)
+
+# Track which students have already been logged this session (avoid duplicates)
+logged_today = set()
+
+print("Starting attendance detection. Press Q to quit.")
 
 while True:
     ret, frame = video_capture.read()
@@ -42,39 +54,73 @@ while True:
         print("Failed to grab frame from camera")
         break
 
-    # Resize frame for faster processing
-    small_frame = cv2.resize(frame, (0, 0), fx=0.25, fy=0.25)
-    rgb_small_frame = cv2.cvtColor(small_frame, cv2.COLOR_BGR2RGB)
+    frame_count += 1
 
-    face_locations = face_recognition.face_locations(rgb_small_frame)
-    face_encodings = face_recognition.face_encodings(rgb_small_frame, face_locations)
+    if frame_count % 3 == 0:
+        h, w = frame.shape[:2]
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-    for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-        matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
-        name_key = "Unknown"
+        results = face_detector.process(rgb_frame)
 
-        if True in matches:
-            first_match_index = matches.index(True)
-            name_key = known_face_names[first_match_index]
-            user_info = user_data.get(name_key, {})
-            display_text = f"{user_info.get('name', 'Unknown')} | Age: {user_info.get('age', 'N/A')} | Height: {user_info.get('height', 'N/A')}"
-        else:
-            display_text = "Unknown"
+        last_face_locations = []
+        last_display_texts   = []
 
-        # Scale back up face locations
-        top *= 4
-        right *= 4
-        bottom *= 4
-        left *= 4
+        if results.detections:
+            for detection in results.detections:
+                bbox = detection.location_data.relative_bounding_box
 
-        # Draw rectangle and label
-        cv2.rectangle(frame, (left, top), (right, bottom), (0, 255, 0), 2)
-        cv2.putText(frame, display_text, (left, top - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                left   = max(0, int(bbox.xmin * w))
+                top    = max(0, int(bbox.ymin * h))
+                right  = min(w, int((bbox.xmin + bbox.width) * w))
+                bottom = min(h, int((bbox.ymin + bbox.height) * h))
 
-    cv2.imshow("Face Recognition App", frame)
+                face_loc  = [(top, right, bottom, left)]
+                encodings = face_recognition.face_encodings(rgb_frame, face_loc)
 
-    if cv2.waitKey(1) & 0xFF == ord("q"):
+                display_text = "Unknown"
+
+                if encodings and known_encodings:
+                    distances = face_recognition.face_distance(known_encodings, encodings[0])
+                    best_idx  = int(np.argmin(distances))
+
+                    if distances[best_idx] < 0.6:
+                        matched_student = known_students[best_idx]
+                        name_history.append(matched_student.id)
+                    else:
+                        name_history.append(None)
+
+                    # Majority vote over rolling buffer
+                    known_votes = [n for n in name_history if n is not None]
+                    if known_votes:
+                        best_id = max(set(known_votes), key=known_votes.count)
+                        # Find the student object
+                        student = next((s for s in known_students if s.id == best_id), None)
+                        if student:
+                            display_text = f"{student.name} | Grade {student.grade}"
+
+                            # Log attendance if not already logged this session
+                            if student.id not in logged_today:
+                                logged = log_attendance(student.id)
+                                if logged:
+                                    print(f"Attendance logged: {student.name} ({student.grade})")
+                                logged_today.add(student.id)
+
+                last_face_locations.append((top, right, bottom, left))
+                last_display_texts.append(display_text)
+
+    # Draw on every frame using last known positions
+    for (top, right, bottom, left), display_text in zip(last_face_locations, last_display_texts):
+        color = (0, 255, 0) if display_text != "Unknown" else (0, 0, 255)
+        cv2.rectangle(frame, (left, top), (right, bottom), color, 2)
+        cv2.putText(frame, display_text, (left, top - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+    cv2.imshow("Attendance — Press Q to quit", frame)
+
+    if cv2.waitKey(30) & 0xFF == ord("q"):
         break
 
 video_capture.release()
+face_detector.close()
 cv2.destroyAllWindows()
+print(f"\nSession ended. Students logged today: {len(logged_today)}")

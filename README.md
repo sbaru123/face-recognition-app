@@ -1,4 +1,4 @@
-# Face Recognition App
+# CheckIn
 
 A Python-based **facial recognition system** built using [OpenCV](https://opencv.org/) and [face_recognition](https://github.com/ageitgey/face_recognition).  
 This application can detect and recognize faces from a live webcam feed and display stored **metadata** (such as name, age, and height).  
