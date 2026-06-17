@@ -16,6 +16,7 @@ import face_recognition
 import easyocr
 import mediapipe as mp
 import re
+import subprocess
 import numpy as np
 from database import save_student
 
@@ -25,15 +26,61 @@ face_detector = mp_face_detection.FaceDetection(model_selection=0, min_detection
 ocr_reader = easyocr.Reader(["en"], gpu=False)
 
 
-def get_webcam_index(max_index=5):
+def get_camera_names():
+    """Use macOS AVFoundation to get real camera names mapped to their index."""
+    try:
+        result = subprocess.run(
+            ["python3", "-c",
+             "from AVFoundation import AVCaptureDevice, AVMediaTypeVideo; "
+             "[print(f'{i}:{d.localizedName()}') for i, d in "
+             "enumerate(AVCaptureDevice.devicesWithMediaType_(AVMediaTypeVideo))]"
+             ],
+            capture_output=True, text=True, timeout=5
+        )
+        names = {}
+        for line in result.stdout.strip().split("\n"):
+            if ":" in line:
+                idx, name = line.split(":", 1)
+                names[int(idx)] = name.strip()
+        return names
+    except Exception:
+        return {}
+
+
+def list_cameras(max_index=5):
+    names = get_camera_names()
+    cameras = []
     for i in range(max_index):
         cap = cv2.VideoCapture(i, cv2.CAP_AVFOUNDATION)
         if cap.isOpened():
             ret, _ = cap.read()
             cap.release()
             if ret:
-                return i
-    return 0
+                label = names.get(i, f"Camera {i}")
+                cameras.append((i, label))
+    return cameras
+
+
+def pick_camera():
+    cameras = list_cameras()
+    if not cameras:
+        print("No cameras found, defaulting to index 0")
+        return 0
+    if len(cameras) == 1:
+        print(f"Using only available camera: {cameras[0][1]}")
+        return cameras[0][0]
+
+    print("\nAvailable cameras:")
+    for idx, (cam_index, label) in enumerate(cameras):
+        print(f"  [{idx}] {label}")
+    while True:
+        try:
+            choice = int(input("Select camera number: "))
+            if 0 <= choice < len(cameras):
+                return cameras[choice][0]
+        except ValueError:
+            pass
+        print("Invalid choice, try again.")
 
 
 def detect_face_on_card(frame):
@@ -92,7 +139,7 @@ def ocr_card(frame):
 
 
 def main():
-    cam_index = get_webcam_index()
+    cam_index = pick_camera()
     cap = cv2.VideoCapture(cam_index, cv2.CAP_AVFOUNDATION)
 
     # Warm up

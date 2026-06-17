@@ -2,6 +2,7 @@ import cv2
 import face_recognition
 import mediapipe as mp
 import numpy as np
+import subprocess
 from collections import deque
 from database import load_all_encodings, log_attendance
 
@@ -15,20 +16,65 @@ mp_face_detection = mp.solutions.face_detection
 face_detector = mp_face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
 
 
-def get_webcam_index(max_index=5):
+def get_camera_names():
+    """Use macOS AVFoundation to get real camera names mapped to their index."""
+    try:
+        result = subprocess.run(
+            ["python3", "-c",
+             "from AVFoundation import AVCaptureDevice, AVMediaTypeVideo; "
+             "[print(f'{i}:{d.localizedName()}') for i, d in "
+             "enumerate(AVCaptureDevice.devicesWithMediaType_(AVMediaTypeVideo))]"
+             ],
+            capture_output=True, text=True, timeout=5
+        )
+        names = {}
+        for line in result.stdout.strip().split("\n"):
+            if ":" in line:
+                idx, name = line.split(":", 1)
+                names[int(idx)] = name.strip()
+        return names
+    except Exception:
+        return {}
+
+
+def list_cameras(max_index=5):
+    """Return a list of (index, label) for all working cameras."""
+    names = get_camera_names()
+    cameras = []
     for i in range(max_index):
         cap = cv2.VideoCapture(i, cv2.CAP_AVFOUNDATION)
         if cap.isOpened():
             ret, _ = cap.read()
             cap.release()
             if ret:
-                print(f"Working camera found at index {i}")
-                return i
-    print("No working camera found, defaulting to 0")
-    return 0
+                label = names.get(i, f"Camera {i}")
+                cameras.append((i, label))
+    return cameras
 
 
-camera_index = get_webcam_index()
+def pick_camera():
+    cameras = list_cameras()
+    if not cameras:
+        print("No cameras found, defaulting to index 0")
+        return 0
+    if len(cameras) == 1:
+        print(f"Using only available camera: {cameras[0][1]}")
+        return cameras[0][0]
+
+    print("\nAvailable cameras:")
+    for idx, (cam_index, label) in enumerate(cameras):
+        print(f"  [{idx}] {label}")
+    while True:
+        try:
+            choice = int(input("Select camera number: "))
+            if 0 <= choice < len(cameras):
+                return cameras[choice][0]
+        except ValueError:
+            pass
+        print("Invalid choice, try again.")
+
+
+camera_index = pick_camera()
 video_capture = cv2.VideoCapture(camera_index, cv2.CAP_AVFOUNDATION)
 
 # Warm up camera
