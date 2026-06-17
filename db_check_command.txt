@@ -1,0 +1,25 @@
+-------Check DB----------
+python3 -c "
+from database import Session, Student, FaceEncoding, AttendanceLog
+s = Session()
+students = s.query(Student).all()
+if not students:
+    print('No students enrolled yet.')
+for student in students:
+    encodings = s.query(FaceEncoding).filter_by(student_db_id=student.id).count()
+    logs = s.query(AttendanceLog).filter_by(student_db_id=student.id).count()
+    print(f'ID: {student.id} | {student.name} | Grade {student.grade} | {encodings} encoding(s) | {logs} attendance log(s)')
+s.close()
+"
+
+--------Reset DB----------
+python3 -c "
+from database import Session, Student, FaceEncoding, AttendanceLog
+s = Session()
+s.query(AttendanceLog).delete()
+s.query(FaceEncoding).delete()
+s.query(Student).delete()
+s.commit()
+s.close()
+print('Database cleared.')
+"
