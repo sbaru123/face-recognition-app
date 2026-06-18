@@ -100,6 +100,11 @@ while True:
         print("Failed to grab frame from camera")
         break
 
+    # Normalize orientation — always force landscape regardless of iPhone tilt
+    h, w = frame.shape[:2]
+    if h > w:
+        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
     frame_count += 1
 
     if frame_count % 3 == 0:

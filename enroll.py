@@ -156,6 +156,11 @@ def main():
             print("Camera error")
             break
 
+        # Normalize orientation — always force landscape regardless of iPhone tilt
+        h, w = frame.shape[:2]
+        if h > w:
+            frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+
         display = frame.copy()
         cv2.putText(display, "Hold ID up to camera. Press SPACE to capture.",
                     (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
